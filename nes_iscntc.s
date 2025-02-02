@@ -1,6 +1,6 @@
 .segment "CODE"
 ISCNTC:       JSR SILENTRDKEY           ; read a key silently from keyboard
-              CMP #$43                  ; is it a C?
+              CMP #CKEY                  ; is it a C?
               BNE NOTCTRLC
               LDA KBMODKEY              ; load the modifier key states
               AND #$11                  ; is at least one ctrl key being pressed?

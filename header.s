@@ -16,8 +16,13 @@
   .byte $4E, $45, $53, $1A
   .byte $02                 ; 2x 16KB PRG code
   .byte $00                 ; 0x  8KB CHR data
-  .byte $A9, $D8            ; mapper 0, vertical mirroring
+.ifdef CONFIG_1K_CHR
+  .byte $A9, $D8            ; mapper 218, vertical mirroring
   .byte $00, $00, $0F, $04  ; 8KB of Work RAM, 1KB of CHR RAM
+.else
+  .byte $01, $08            ; mapper 0, vertical mirroring
+  .byte $00, $00, $0F, $06  ; 8KB of Work RAM, 4KB of CHR RAM
+.endif
   .byte $00, $00, $00, $23  ; default expansion device Family Basic Keyboard
 
   .segment "ISR"

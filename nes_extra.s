@@ -101,7 +101,11 @@ load_palettes:  LDA #$3F
                 STY PPUMASK
                 STY PPUADDR
                 STY PPUADDR
+                .ifdef CONFIG_1K_CHR
                 LDX #$04        ; store up to 4x 256B pages
+                .else
+                LDX #$10        ; store up to 16x 256B pages
+                .endif
                 : LDA ($00),Y
                 STA PPUDATA
                 INY
@@ -313,6 +317,14 @@ CHECKMODKEYS:   PHA
                 LDA #>KBMSHIFTMAP
                 STA $FF
 LOOPMODMAP:     LDY #$00
+                LDA fkbtemp              ; check if an ascii code
+                CMP #$40
+                BCC :+
+                CMP #$5B                 ; if so, add 0x20 to replace
+                BCS :+
+                CLC
+                ADC #$20
+                JMP RESTOREACTION       
                 : LDA ($FE),Y
                 CMP #$00                
                 BEQ EXITMODCHECK        ; reached the end of the shiftmap table
@@ -322,10 +334,10 @@ LOOPMODMAP:     LDY #$00
                 JMP :-
 REPLACEKEY:     TYA
                 CLC
-                ADC #$15                ; shift to replacement table index
+                ADC #$18                ; shift to replacement table index
                 TAY
                 LDA ($FE),Y
-                STA fkbtemp
+RESTOREACTION   : STA fkbtemp
                 PLA
                 AND #$80                ; get up/down state from original code
                 ORA fkbtemp             ; and apply to replaced key code
@@ -552,8 +564,10 @@ CONVASCII:      CMP #$08                ; check for backspace
                 LDA #$3F                ; print an underscore if backspace
                 : CMP #$20
                 BCC :+
-                CMP #$60                ; return blank for anything above E0
-                BCS :+
+                .ifdef CONFIG_1K_CHR
+                CMP #$60                ; return blank for anything above 60
+                BCS :+                  ; for single chip cartridge only
+                .endif
                 SEC
                 SBC #$20                ; subtract A0 to get the character
                 JMP RETCHR
@@ -698,6 +712,20 @@ INCVSCROLLH:    INC VSCROLL+1
 
 .segment "RODATA"
 
+PALETTES:
+  ; Background Palette
+  .byte $0F, $00, $00, $00
+  .byte $0F, $12, $00, $00
+  .byte $0F, $00, $00, $00
+  .byte $0F, $00, $00, $00
+
+  ; Sprite Palette
+  .byte $0F, $20, $17, $29
+  .byte $0F, $07, $00, $00
+  .byte $0F, $1A, $00, $00
+  .byte $0F, $34, $00, $00
+
+
 FBKBMAP: ; this maps the family keyboard to ascii values; ignore $00
   .byte $5D, $5B, $0D, $00, $00, $00, $00, $00 ; row 0
   .byte $3B, $3A, $40, $00, $5E, $2D, $2F, $5F ; row 1
@@ -708,15 +736,16 @@ FBKBMAP: ; this maps the family keyboard to ascii values; ignore $00
   .byte $41, $53, $57, $00, $33, $45, $5A, $58 ; row 6
   .byte $00, $51, $1B, $00, $32, $31, $00, $00 ; row 7
   .byte $00, $00, $00, $00, $00, $08, $20, $00 ; row 8
-FBKBSHIFTMAP:  ; this is the lookup table for shift modifiers
+; these are the lookup tables for shift modifiers
+FBKBSHIFTMAP:  
   ; the first block is normal keys
   .byte $30, $31, $32, $33, $34, $35, $36, $37
   .byte $38, $39, $2D, $5B, $5D, $5C, $3B, $3A
-  .byte $40, $2C, $2E, $2F, $00
+  .byte $40, $2C, $2E, $2F, $00, $00, $00, $00
   ; the second is their counterpart + $15
   .byte $00, $21, $22, $23, $24, $25, $26, $27
   .byte $28, $29, $3D, $7B, $7D, $5F, $2B, $2A
-  .byte $60, $3C, $3E, $3F, $00
+  .byte $60, $3C, $3E, $3F, $00, $00, $00, $00
 
 KBMHOSTMAP: ; this maps the input values to the ascii values; ignore $00
             ; wozmon expects key releases to be returned +0x80
@@ -736,27 +765,18 @@ KBMHOSTMAP: ; this maps the input values to the ascii values; ignore $00
   .byte $00, $00, $00, $00, $00, $00, $00, $00 ; 68 - 6F
   .byte $00, $00, $00, $00, $00, $00, $00, $00 ; 70 - 77
   .byte $00, $00, $00, $00, $00, $00, $00, $00 ; 78 - 7F
-KBMSHIFTMAP:  ; this is the lookup table for shift modifiers
+KBMSHIFTMAP:
   ; the first block is normal keys
   .byte $30, $31, $32, $33, $34, $35, $36, $37
   .byte $38, $39, $2D, $5B, $5D, $5C, $3B, $27
-  .byte $60, $2C, $2E, $2F, $00
+  .byte $60, $2C, $2E, $2F, $00, $00, $00, $00
   ; the second is their counterpart + $15
   .byte $29, $21, $40, $23, $24, $25, $5E, $26
   .byte $2A, $28, $5F, $7B, $7D, $7C, $3A, $22
-  .byte $7E, $3C, $3E, $3F, $00
+  .byte $7E, $3C, $3E, $3F, $00, $00, $00, $00
 
-PALETTES:
-  ; Background Palette
-  .byte $0F, $00, $00, $00
-  .byte $0F, $12, $00, $00
-  .byte $0F, $00, $00, $00
-  .byte $0F, $00, $00, $00
-
-  ; Sprite Palette
-  .byte $0F, $20, $17, $29
-  .byte $0F, $07, $00, $00
-  .byte $0F, $1A, $00, $00
-  .byte $0F, $34, $00, $00
-
-TILEDATA: .incbin "./chars.chr"
+.ifdef CONFIG_1K_CHR
+TILEDATA: .incbin "./chars1k.chr"
+.else
+TILEDATA: .incbin "./chars4k.chr"
+.endif

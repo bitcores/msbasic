@@ -4,6 +4,9 @@ CONFIG_2C := 1
 CONFIG_SCRTCH_ORDER := 1
 CONFIG_MONCOUT_DESTROYS_Y = 1
 CONFIG_NO_CR := 1
+; configures build for mapper 218
+; https://www.nesdev.org/wiki/INES_Mapper_218
+CONFIG_1K_CHR := 1
 
 ; zero page
 ZP_START1 = $00
@@ -21,6 +24,8 @@ STACK_TOP		:= $FD
 SPACE_FOR_GOSUB := $44
 WIDTH			:= 20
 WIDTH2			:= 10
+CKEY            := $43
+
 
 ; memory layout
 RAMSTART2	    := $6000
