@@ -26,4 +26,7 @@
 .ifdef SYM1
 .include "sym1_iscntc.s"
 .endif
+.ifdef NES
+.include "nes_iscntc.s"
+.endif
 ;!!! runs into "STOP"
