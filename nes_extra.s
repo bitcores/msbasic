@@ -66,7 +66,7 @@ clear_ram:      LDA #$00
                 :STA $0000,X
                 INX
                 BNE :-
-
+                
 ;; second wait for vblank, PPU is ready after this
                 : BIT PPUSTATUS
                 BPL :-
@@ -141,10 +141,44 @@ load_palettes:  LDA #$3F
 ;; routines to be called from program
 ;; ------------------------------------------------------------
 
-;; save and load is not supported at this time
-SAVE:
+;; save and load work with a tape recorder, Family Basic Recorder compat
+SAVE:           LDA #<NES_WRITING
+                LDY #>NES_WRITING
+                JSR STROUT
+                JSR VBWAIT
+                JSR CMTBUILDHEADER
+                JSR CMTWRITEHEADER
+                JSR CMTWRITEDATA
                 RTS
-LOAD:
+LOAD:           LDA #<NES_LOADING
+                LDY #>NES_LOADING
+                JSR STROUT
+                JSR VBWAIT
+                JSR CMTREADHEADER
+                BCS NESLOADERR
+;   check that target location is configured RAM
+                LDA TXTTAB
+                CMP $0512
+                BNE NESLOADERR
+                LDA TXTTAB+1
+                CMP $0513
+                BNE NESLOADERR
+                JSR CMTREADDATA
+                BCS NESLOADERR
+;   update variables after data copy
+                LDA $0514
+                STA VARTAB
+                STA ARYTAB
+                STA STREND
+                LDA $0515
+                STA VARTAB+1
+                STA ARYTAB+1
+                STA STREND+1
+                RTS
+NESLOADERR:     LDA #<NES_LOADERROR
+                LDY #>NES_LOADERROR
+                JSR STROUT
+                JSR VBWAIT
                 RTS
 
 MONCOUT:        PHA
@@ -262,6 +296,273 @@ NOKEYPRESS:                             ; only vbwait if there are no keys in th
 ;; ------------------------------------------------------------
 ;; internal routines
 ;; ------------------------------------------------------------
+;; these are mostly here for tape reading and writing
+NMIDISABLE:     LDA #$00  ; Disable NMI
+                STA PPUCTRL
+                RTS
+NMIENABLE:      LDA #$80  ; Enable NMI
+                STA PPUCTRL
+                RTS
+                
+;; building the header data for saving
+CMTBUILDHEADER: LDY #$1F
+                LDA #$45
+                STA $0500
+                LDA #$20
+                :STA $0500,Y
+                DEY
+                BNE :-
+                STY $0511
+                LDA #$04
+                STA $051E
+
+                ;; data position start
+                LDA TXTTAB
+                STA $0512
+                LDA TXTTAB+1
+                STA $0513
+                ;; data end position
+                LDA VARTAB
+                STA $0514
+                LDA VARTAB+1
+                STA $0515
+
+                RTS
+
+;; header and data pointer setup
+CMTHEADPOINTERS:LDA #$00
+                STA $E0
+                LDA #$30
+                STA $E2
+                LDA #$05
+                STA $E1
+                STA $E3
+                RTS
+CMTDATAPOINTERS:LDA $0512
+                STA $E0
+                LDA $0513
+                STA $E1
+                LDA $0514
+                STA $E2
+                LDA $0515
+                STA $E3
+                RTS
+                
+;; checksum handlers
+CMTCSINIT:      LDA #$00
+                STA $DD
+                STA $DE
+                RTS
+CMTCSINC:       INC $DD
+                BNE :+
+                INC $DE
+                :RTS
+
+;; data pointer handlers
+CMTPOINTERINC:  INC $E0
+                BNE :+
+                INC $E1
+                :RTS
+CMTPOINTEREND:  LDA $E0
+                CMP $E2
+                BNE :+
+                LDA $E1
+                CMP $E3
+                :RTS        ; return EQ if end
+
+;; setup to write header to tape
+CMTWRITEHEADER: JSR NMIDISABLE
+                JSR CMTHEADPOINTERS
+                LDA #$30    ; 48+48 bit header mark
+                STA $DC
+                JMP CMTWRITEOUT
+CMTWRITEDATA:   JSR NMIDISABLE
+                JSR CMTDATAPOINTERS
+                LDA #$20    ; 32+32 bit data mark
+                STA $DC
+CMTWRITEOUT:    LDA #$88    ; 5000 bit gap, approx 2.5s
+                STA $DD
+                LDA #$13
+                STA $DE
+                :JSR CMTSHORTPULSE
+                DEC $DD
+                BNE :-
+                DEC $DE
+                BNE :-
+
+                LDA $DC
+                STA $DD
+                :JSR CMTLONGPULSE
+                DEC $DD
+                BNE :-
+                LDA $DC
+                STA $DD
+                :JSR CMTSHORTPULSE
+                DEC $DD
+                BNE :-
+
+                JSR CMTLONGPULSE
+                JSR CMTCSINIT
+
+                :LDY #$00
+                LDA ($E0),Y
+                JSR CMTWRITEBYTE
+                JSR CMTPOINTERINC
+                JSR CMTPOINTEREND
+                BNE :-
+
+                LDA $DD        ; write out the checksum
+                PHA
+                LDA $DE
+                JSR CMTWRITEBYTE
+                PLA
+                JSR CMTWRITEBYTE
+                JSR CMTLONGPULSE
+                JMP NMIENABLE  ; RTS will take back to original location
+
+;; wait for the next bit of data to read
+CMTWAITNEXTBIT: ; probably check for stop key
+                ; and beq if needed
+                LDA JOYPAD1
+                AND #$02
+                BEQ CMTWAITNEXTBIT
+               :; probably check for stop key
+                ; and beq if needed
+                LDA JOYPAD1
+                AND #$02
+                BNE :-
+                CLC ; maybe not use this?
+                RTS
+
+;; write either a long pulse or short pulse to tape
+CMTLONGPULSE:   PHA
+                LDA #$6B
+                STA $DF
+                PHA
+                JMP CMTWRITEPULSE
+CMTSHORTPULSE:  PHA
+                LDA #$35
+                STA $DF
+                PHA
+CMTWRITEPULSE:  LDA #$04
+                STA JOYPAD1
+                :DEC $DF
+                BNE :-
+                PLA
+                STA $DF
+                LDA #$05
+                STA JOYPAD1
+                :DEC $DF
+                BNE :-
+                PLA
+                RTS
+
+;; write a byte to the tape
+CMTWRITEBYTE:   JSR CMTLONGPULSE
+                LDX #$08
+CMTBYTELOOP:    ASL A
+                BCS CMTBYTEHIGH
+                JSR CMTSHORTPULSE
+CMTBYTECHECK:   DEX
+                BNE CMTBYTELOOP
+                RTS
+CMTBYTEHIGH:    JSR CMTLONGPULSE
+                JSR CMTCSINC
+                JMP CMTBYTECHECK
+
+;; wait for pulse to read bit
+;; need to add esc/break checks
+CMTREADWAIT:    LDA JOYPAD1
+                AND #$02
+                BEQ CMTREADWAIT
+
+                :LDA JOYPAD1
+                AND #$02
+                BNE :-
+
+                RTS
+
+;; read a bit from the CMT
+CMTREADBIT:     JSR CMTREADWAIT
+                ; exit if break
+                LDA #$4E
+                STA $DC
+                :DEC $DC
+                BNE :-
+                LDA JOYPAD1
+                AND #$02
+                CLC
+                RTS
+
+;; read a byte from the CMT
+CMTREADBYTE:    LDA #$08
+                STA $DB
+                LDA #$00
+                STA $DF
+CMTBYTEREADLOOP:ASL $DF
+                JSR CMTREADBIT
+                BNE :+
+                JSR CMTCSINC
+                INC $DF
+                :DEC $DB
+                BNE CMTBYTEREADLOOP
+                JSR CMTREADWAIT
+                LDA $DF
+                CLC
+                RTS
+
+;; reading data from the tape recorder
+CMTREADHEADER:  JSR NMIDISABLE
+                JSR CMTHEADPOINTERS
+                LDA #$30
+                STA $DB
+                JMP CMTREADIN
+CMTREADDATA:    JSR NMIDISABLE
+                JSR CMTDATAPOINTERS
+                LDA #$20
+                STA $DB
+CMTREADIN:      LDA $DB             ; waiting for mark
+                STA $DD
+                :JSR CMTREADBIT
+                ; EXIT IF BREAK/ESC
+                BNE CMTREADIN
+                DEC $DD
+                BNE :-
+
+                LDA $DB
+                STA $DD
+                :JSR CMTREADBIT
+                ; EXIT IF BREAK/ESC
+                BEQ CMTREADIN
+                DEC $DD
+                BNE :-
+
+                JSR CMTCSINIT           ; start reading section
+                JSR CMTREADWAIT
+                JSR CMTREADWAIT
+                :JSR CMTREADBYTE
+                ; EGXIT
+                LDY #$00
+                STA ($E0),Y
+                JSR CMTPOINTERINC
+                JSR CMTPOINTEREND
+                BNE :-
+
+                LDA $DD
+                STA $E0
+                LDA $DE
+                STA $E1
+                JSR CMTREADBYTE
+                CMP $E1
+                BNE CMTREADERROR
+                JSR CMTREADBYTE
+                CMP $E0
+                BNE CMTREADERROR
+                CLC
+                JMP NMIENABLE
+CMTREADERROR:   JSR NMIENABLE
+                SEC
+                RTS
 
 ;; discover which keyboard mode to use and prepare it
 ;; detect keyboard present
@@ -307,6 +608,15 @@ CHECKMODKEYS:   PHA
                 AND #$7F
                 STA fkbtemp
                 LDA KBMODKEY
+                AND #$11                ; is any ctrl key held?
+                BEQ CHECKMODSHIFT
+                LDA fkbtemp
+                CMP #$43                ; is it a "C"
+                BNE RESTOREACTION
+                PLA
+                AND #$03                ; return ctrl+c code
+                JMP EXITWITHBREAK
+CHECKMODSHIFT:  LDA KBMODKEY
                 AND #$22                ; is any shift key held?
                 BEQ EXITMODCHECK
                 LDA kbdetect            ; load address of shiftmap depending on
@@ -342,13 +652,13 @@ REPLACEKEY:     TYA
                 ADC #$18                ; shift to replacement table index
                 TAY
                 LDA ($FE),Y
-RESTOREACTION   : STA fkbtemp
+RESTOREACTION:	STA fkbtemp
                 PLA
                 AND #$80                ; get up/down state from original code
                 ORA fkbtemp             ; and apply to replaced key code
                 RTS
 EXITMODCHECK:   PLA
-                RTS
+EXITWITHBREAK:  RTS
 
 ; read input from keyboard mouse host
 READKBMH:       PHP
@@ -357,18 +667,17 @@ READKBMH:       PHP
 
                 LDY #$00
                 ; strobe $4016 once to signal start reading
-                LDA #$00
-                STA JOYPAD1
+                STY JOYPAD1
                 NOP
                 NOP
                 NOP
-                LDA #$01
-                STA JOYPAD1
+                INY
+                STY JOYPAD1
                 NOP
                 NOP
                 NOP
-                LSR A
-                STA JOYPAD1
+                DEY
+                STY JOYPAD1
                 ; loop this four times total for 4 bytes
 LOOPFOUR:       LDA #$01
                 STA mseinput
@@ -716,6 +1025,19 @@ INCVSCROLLH:    INC VSCROLL+1
 
 
 .segment "RODATA"
+
+NES_WRITING:
+    .byte "WRITING..."
+    .byte   0
+NES_LOADING:
+    .byte "LOADING..."
+    .byte   0
+NES_LOADSKIP:
+    .byte "SKIPPED"
+    .byte   0
+NES_LOADERROR:
+    .byte "ERROR"
+    .byte   0
 
 PALETTES:
   ; Background Palette
