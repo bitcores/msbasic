@@ -50,7 +50,6 @@ NES_RESET:      SEI
                 BPL :-
 
 clear_ram:      LDA #$00
-                STA $0000,X
                 STA $0100,X
                 STA $0300,X
                 STA $0400,X
@@ -61,6 +60,12 @@ clear_ram:      LDA #$00
                 STA $0200,X
                 INX
                 BNE clear_ram
+;; only clear the NES section of ZP
+                LDX #ZP_START5
+                LDA #00
+                :STA $0000,X
+                INX
+                BNE :-
 
 ;; second wait for vblank, PPU is ready after this
                 : BIT PPUSTATUS
